@@ -1,0 +1,30 @@
+"""Assignment 2: Script 3: 
+calculating burn severity areas using categories described by 
+Rozario et al (2018) """
+
+__author__ = 'Delanie Kidnie'
+
+
+
+import numpy
+import rasterio
+import matplotlib
+import matplotlib.pyplot as plt
+
+
+def area(low: float, high: float, array, label):
+    """Area in hectares"""
+    area = numpy.logical_and(
+            (low <= array), (array <= high)).sum() * (10 * 10) / 10000
+    print(f'{label}: {area}')
+
+
+with rasterio.open('assignment-2-burn-severity-mask.tif') as burn_severity:
+    data = burn_severity.read(1)
+    area(-0.5, -0.251, data, 'Enhanced Regrowth, High (Post Fire)')
+    area(-0.25, -0.101, data, 'Enhanced Growth, Low (Post Fire)')
+    area(-0.1, 0.99, data, 'unburned')
+    area(.1, .269, data, 'Low severity')
+    area(.27, .439, data, 'Moderate-low severity')
+    area(.44, .659, data, 'Moderate-high severity')
+    area(.66, 1.3, data, 'High severity')
