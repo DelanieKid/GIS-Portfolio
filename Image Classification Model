@@ -1,0 +1,374 @@
+# %% [markdown]
+# ###### Delanie Kidnie
+
+# %% [markdown]
+# This project will create a deep learning classification model to classify the number images in the MNIST dataset. 
+
+# %% [markdown]
+# #### Load Libraries
+
+# %%
+import os
+import torch
+import torchvision
+from torchvision import transforms
+import matplotlib.pyplot as plt
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+import seaborn as sns
+import numpy as np
+import os
+
+device = torch.device("cpu")
+device
+
+# %% [markdown]
+# #### Load in MNIST dataset
+
+# %%
+# Define the directory where you want to save the dataset
+download_path = 'C:\\Users\\delan\\Documents\\NSCC\\GDA1020\\datamining\\data\\MNIST'
+
+# Check if the directory exists, if not create it
+if not os.path.exists(download_path):
+    os.makedirs(download_path)
+
+# Define the transformation
+transform = transforms.ToTensor()
+
+# Set the batch size
+batch_size = 8
+
+# Create the training dataset object
+trainset = torchvision.datasets.MNIST(root=download_path, train=True, download=True, transform=transform)
+
+# Create the test dataset object
+testset = torchvision.datasets.MNIST(root=download_path, train=False, download=True, transform=transform)
+
+classes = ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9')
+
+# %% [markdown]
+# Verify what the tensors look like and what the classes of the dataset are. 
+
+# %%
+train_iter = iter(trainset)
+image, label = next(train_iter)
+
+print(image.shape, label)
+print(trainset.class_to_idx)
+
+classes = trainset.classes
+print(classes)
+
+# %% [markdown]
+# Based on this information, this dataset has 1 channel, which makes sense since they are black and white images. The images are also 28 by 28 in size, and the first example has a class label of five. 
+
+# %% [markdown]
+# #### Visualize Tensor
+
+# %% [markdown]
+# Using `matplotlib` the transformed imagery in the tensor can be visualized. This is useful to ensure that the imagery is being processed properly and that labels are being applied correctly. 
+
+# %%
+index = 9
+image, label = trainset[index]
+
+plt.imshow(image.permute(1,2,0))
+plt.title(f'Label: {classes[label]}')
+plt.show()
+
+# %% [markdown]
+# ## Prepare Data for Training
+
+# %% [markdown]
+# Determine length of training and testing sets.
+
+# %%
+len(trainset), len(testset)
+
+# %% [markdown]
+# Create subsets of training data for training and validation. For this project it was decided to separate a fifth of the training set into the validation dataset.
+
+# %%
+trainset, valset = torch.utils.data.random_split(trainset, [48000, 12000])
+
+len(trainset), len(valset), len(testset)
+
+# %% [markdown]
+# Check the number of batches data will be divided in for training and confirm that the training data is a subset of the overall dataset.
+
+# %%
+print(f'The number of batches in the training set {int(48000/batch_size)}')
+
+print(f'The number of batches in the validation set {int(12000/batch_size)}')
+
+print(type(trainset))
+
+# %% [markdown]
+# ## Model Preparation
+
+# %% [markdown]
+# #### Setup Data Loaders
+
+# %% [markdown]
+# While this model has been set up to run using CPU, it will still need data loaders to be established. The main difference being that the number of workers set for the data loaders will be zero, and there will be no use of the `pin_memory`.
+
+# %%
+trainloader = torch.utils.data.DataLoader(trainset, 
+                                          batch_size=batch_size,
+                                          shuffle=True,
+                                          num_workers=0,
+                                          pin_memory=False)
+valloader = torch.utils.data.DataLoader(valset, 
+                                          batch_size=batch_size,
+                                          shuffle=False,
+                                          num_workers=0,
+                                          pin_memory=False)
+testloader = torch.utils.data.DataLoader(testset, 
+                                          batch_size=batch_size,
+                                          shuffle=False,
+                                          num_workers=0,
+                                          pin_memory=False)
+
+# %% [markdown]
+# ## Convoluted Neural Network Architecture 
+
+# %% [markdown]
+# For this project the convoluted neural network model will be used as it is good for image classification.  This process involves creating a class to define the model. In the class there are four main components: convolution layers, max pooling layers, linear layers, and dropout layers. The convolution layers are there to idenfity key areas in the images like edges and textures, and with each increase in channels more information is aggregated from the images. The max pooling does essentially the opposite of teh convolution layers and downsample the data, and the purpose of this is to reduce model complexity. These two steps result in emphasis in the key features of images which helps the model to learn patterns more efficiently. 
+# 
+# Next the forward function needs to be called in the class, this will provide instructions for how the model will flow from one layer to the next. This step will also define the activation functions which help the model create curves of best fit for the data.
+
+# %%
+class OptimizedNeuralNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        # Convolutional layers
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.pool1 = nn.MaxPool2d(2, 2)
+
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.pool2 = nn.MaxPool2d(2, 2)
+
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.pool3 = nn.MaxPool2d(2, 2)
+
+        # Gllobal Average Pooling
+        self.gap = nn.AdaptiveAvgPool2d(1)
+
+        #fully connected layer
+        self.fc = nn.Linear(128, 10)
+
+    def forward(self, x):
+        # convolutional + batchnorm + activation + pooling
+        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
+        x = self.pool3(F.relu(self.bn3(self.conv3(x))))
+
+        # global average pooling
+        x = self.gap(x)
+        x = torch.flatten(x, 1)
+
+        # fully connected output
+        x = self.fc(x)
+
+        return x
+
+# %% [markdown]
+# #### Push model to Device and Verify Parameters.
+
+# %% [markdown]
+# This step is more important when running a model on GPU but it does not inhibit the model on CPU and therefore was still included. 
+
+# %%
+net = OptimizedNeuralNet()
+net.to(device)
+
+# %%
+for i, data in enumerate(trainloader):
+    inputs, labels = data[0].to(device), data[1].to(device)
+    print(f'input shape: {inputs.shape}')
+    print(f'after network shape: {net(inputs).shape}')
+    print(labels)
+    break
+
+# %%
+num_params = 0
+for x in net.parameters():
+    num_params += len(torch.flatten(x))
+print(f'Number of parameters in the model: {num_params:,}')
+
+# %% [markdown]
+# ## Select Loss Function and Optimization Technique
+
+# %% [markdown]
+# For this project the `CrossEntropyLoss` function was used because of its suitability with multi-class classigication models. The loss function is important as it is the parameter that the model will work to reduce by adjusting hyperparameters. The learning rate for this model was decided as 0.0001 and will determine the aggressiveness in which the model works to correct itself. 
+
+# %%
+criterion = nn.CrossEntropyLoss()
+# optimizer = optim.Adam(net.parameters(), lr=0.0001)
+optimizer2 = optim.Adam(net.parameters(), lr=0.001)
+
+# %% [markdown]
+# Two learning rates were tested and used to train the model. The first was 0.0001 which resulted in an accuracy of approximately 98%, and the second was 0.001 which resulted in an accuracy of approximately 99%. With the improvement from the second learning rate and the accuracy already being so high, it was determined that the 0.001 value was sufficient. 
+
+# %% [markdown]
+# ## Define and Run Training Loops
+
+# %% [markdown]
+# #### Setup Training Epoch
+
+# %% [markdown]
+# The training epoch will be used to do exactly as it sounds, train the model. It is key to have the mode in `net.train` to be set to true for this. 
+
+# %%
+def train_one_epoch():
+  net.train(True)
+
+  running_loss = 0.0
+  running_accuracy = 0.0
+
+  for batch_index, data in enumerate(trainloader):
+    inputs, labels = data[0].to(device), data[1].to(device)
+
+    optimizer2.zero_grad()
+
+    outputs = net(inputs) 
+    correct = torch.sum(labels == torch.argmax(outputs, dim=1)).item()
+    running_accuracy += correct / batch_size
+
+    loss = criterion(outputs, labels)
+    running_loss += loss.item()
+    loss.backward()
+    optimizer2.step()
+
+    if batch_index % 500 == 499: 
+      avg_loss_across_batches = running_loss / 500
+      avg_acc_across_batches = (running_accuracy / 500) * 100
+      print('Batch {0}, Loss: {1:.3f}, Accuracy: {2:.1f}%'.format(batch_index+1,
+                                                          avg_loss_across_batches,
+                                                          avg_acc_across_batches))
+      running_loss = 0.0
+      running_accuracy = 0.0
+
+    
+  print()
+
+# %% [markdown]
+# #### Setup Validation Epoch
+
+# %% [markdown]
+# The validation epoch will be used to run the trained model on the validation dataset and evaluate the results. This is why the `net.train` is set to false. Using the data provided by this function can inform on how well the model is running outside of the training data.
+
+# %%
+def validate_one_epoch():
+    net.train(False)
+    running_loss = 0.0
+    running_accuracy = 0.0
+    
+    for i, data in enumerate(valloader):
+        inputs, labels = data[0].to(device), data[1].to(device)
+        
+        with torch.no_grad():
+            outputs = net(inputs) # shape: [batch_size, 5]
+            correct = torch.sum(labels == torch.argmax(outputs, dim=1)).item()
+            running_accuracy += correct / batch_size
+            loss = criterion(outputs, labels) # One number, the average batch loss
+            running_loss += loss.item()
+        
+    avg_loss_across_batches = running_loss / len(valloader)
+    avg_acc_across_batches = (running_accuracy / len(valloader)) * 100
+    
+    print('Val Loss: {0:.3f}, Val Accuracy: {1:.1f}%'.format(avg_loss_across_batches,
+                                                            avg_acc_across_batches))
+    print('***************************************************')
+    print()
+
+# %% [markdown]
+# ## Train the Model
+
+# %% [markdown]
+# The model will be trained using 5 epochs of training and validation loops.This means that the model will do 5 passes through the entire training and validation datasets. This allowed the model to reach accuracy of approximately 99%.
+
+# %%
+num_epochs = 5
+
+for epoch_index in range(num_epochs):
+    print(f'epoch: {epoch_index +1}\n')
+
+    train_one_epoch()
+    validate_one_epoch()
+
+print('Finished Training')
+
+# %% [markdown]
+# ## Evaluate the Model
+
+# %% [markdown]
+# Now to see how well the model performs it will be tested on the test dataset created at the beginning. Evaluating the model involves calculating the accuracy of predictions, as well as considering the true/false positive and negative rates. The accuracy was calculating using the `accuracy_score` function and the positives and negatives were illustrated using a confusion matrix.
+
+# %%
+predicted_labels = []
+true_labels = []
+
+for images, labels in testloader:
+    images = images.to(device)
+    labels = labels.to(device)
+    outputs = net(images)
+    _, predicted = torch.max(outputs, dim=1)
+    predicted_labels.extend(predicted.cpu().numpy())
+    true_labels.extend(labels.cpu().numpy())
+
+
+accuracy = accuracy_score(true_labels, predicted_labels)
+print("Accuracy:", accuracy)
+
+class_report = classification_report(true_labels, predicted_labels, target_names=classes)
+
+conf_matrix = confusion_matrix(true_labels, predicted_labels)
+
+# %% [markdown]
+# Acuracy with learning rate of 0.0001: 0.9885
+
+# %%
+print("classification report", class_report)
+print("confusion matrix: ", conf_matrix)
+
+# %% [markdown]
+# The classification report shows that the model had strong accuracy scores and evaluation scores for all classes. 
+
+# %%
+plt.figure(figsize=(8, 6))
+sns.set(font_scale=1.2)
+sns.heatmap(conf_matrix, annot=True, cmap="Blues", fmt="d", xticklabels=classes, yticklabels=classes)
+plt.xlabel("Predicted labels")
+plt.ylabel("Actual labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+# %% [markdown]
+# Overall, the amount of misclassifications in the model were relatively low which aligns with the high accuracy score. There doesn't seem to be any value which is consistently the worst for getting misclassified, but the number 1 is by far the most accurate. 
+
+# %% [markdown]
+# ## Save the Trained Model
+
+# %% [markdown]
+# To avoid having to retrain the model it is helpful to save the model to file.
+
+# %%
+save_dir = 'models'
+
+model_name = "MNIST_epoch.pth"
+save_path = os.path.join(save_dir, model_name)
+
+torch.save(net.state_dict(), save_path)
+
+print(f"Model saved at:{save_path}")
+
+
+
